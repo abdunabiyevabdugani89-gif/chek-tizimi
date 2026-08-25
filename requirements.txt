@@ -1,0 +1,4 @@
+aiogram==3.13.0
+pillow==10.4.0
+pyzbar==0.1.9
+aiohttp==3.10.5
