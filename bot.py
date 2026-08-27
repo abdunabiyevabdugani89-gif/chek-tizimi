@@ -205,9 +205,3 @@ async def process_payment(message: Message, state: FSMContext):
         buyurtma_saqlash(user_data['wakeup_date'], user_data['wakeup_time'], user_data['user_gender'], user_data['user_info'], tushgan_summa)
         await message.answer(f"✅ **To'lov cheki muvaffaqiyatli tasdiqlandi!** Rahmat!")
         
-        report_text = (
-            f"✅ 💰 **Muvaffaqiyatli To'lov Yakunlandi!**\n\n"
-            f"💵 **Tushgan summa:** {tushgan_summa:,} so'm\n"
-            f"📅 **Sana:** {user_data['wakeup_date']}\n"
-            f"⏰ **Soat:** {user_data['wakeup_time']}\n"
-            f"👤 **Jinsi:** {user_data['user_gender']}\n"
