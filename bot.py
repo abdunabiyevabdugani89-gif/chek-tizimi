@@ -1,9 +1,9 @@
 import os
 import asyncio
-import easyocr
 import ssl
 import sqlite3
 import re
+import aiohttp
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
@@ -11,40 +11,21 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from pypdf import PdfReader
 
-# Muhit o'zgaruvchilarini yuklash (.env faylidan)
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
 
 ssl._create_default_https_context = ssl._create_unverified_context
 
-# 💳 KARTA RAQAMLARI
 KARTA_RAQAMLARI = ["9860080387113030", "9860 0803 8711 3030", "986008******3030"]
 ASOSIY_KARTA_KORINISHI = "9860 0803 8711 3030"
 
-# 💾 SQLITE BAZANI SOZLASH
 conn = sqlite3.connect("cheklar.db", check_same_thread=False)
 cursor = conn.cursor()
-
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS ishlatilgan_cheklar (
-    chek_id TEXT PRIMARY KEY
-)
-""")
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS buyurtmalar (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    sana TEXT,
-    soat TEXT,
-    jinsi TEXT,
-    info TEXT,
-    summa INTEGER,
-    vaqt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-)
-""")
+cursor.execute("CREATE TABLE IF NOT EXISTS ishlatilgan_cheklar (chek_id TEXT PRIMARY KEY)")
+cursor.execute("CREATE TABLE IF NOT EXISTS buyurtmalar (id INTEGER PRIMARY KEY AUTOINCREMENT, sana TEXT, soat TEXT, jinsi TEXT, info TEXT, summa INTEGER, vaqt TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
 conn.commit()
 
-# --- BAZA FUNKSIYALARI ---
 def chek_mavjudmi(chek_id):
     cursor.execute("SELECT 1 FROM ishlatilgan_cheklar WHERE chek_id = ?", (chek_id,))
     return cursor.fetchone() is not None
@@ -53,8 +34,7 @@ def chek_qoshish(chek_id):
     try:
         cursor.execute("INSERT INTO ishlatilgan_cheklar (chek_id) VALUES (?)", (chek_id,))
         conn.commit()
-    except sqlite3.IntegrityError:
-        pass
+    except sqlite3.IntegrityError: pass
 
 def buyurtma_saqlash(sana, soat, jinsi, info, summa):
     cursor.execute("INSERT INTO buyurtmalar (sana, soat, jinsi, info, summa) VALUES (?, ?, ?, ?, ?)", (sana, soat, jinsi, info, summa))
@@ -69,7 +49,30 @@ def oxirgi_buyurtmalar():
     cursor.execute("SELECT sana, soat, jinsi, info, summa FROM buyurtmalar ORDER BY id DESC LIMIT 5")
     return cursor.fetchall()
 
-# --- MATNDAN SUMMANI AJRATIB OLISH FUNKSIYASI ---
+# --- RASMDAN MATNNI ONLINE EKSTRAKT QILISH (OCR SPACE FREE API) ---
+async def rasmdan_matn_oqish(file_path: str) -> str:
+    url = "https://ocr.space"
+    payload = {
+        "apikey": "helloworld",  # OCR.space bepul universal kaliti
+        "language": "eng",
+        "isOverlayRequired": "false"
+    }
+    try:
+        async with aiohttp.ClientSession() as session:
+            with open(file_path, 'rb') as f:
+                data = aiohttp.FormData()
+                data.add_field('file', f, filename=os.path.basename(file_path))
+                for k, v in payload.items(): data.add_field(k, v)
+                
+                async with session.post(url, data=data, timeout=30) as resp:
+                    if resp.status == 200:
+                        result = await resp.json()
+                        if "ParsedResults" in result and len(result["ParsedResults"]) > 0:
+                            return result["ParsedResults"][0]["ParsedText"]
+    except Exception as e:
+        print(f"OCR API Xatolik: {e}")
+    return ""
+
 def chek_summasini_top(matn: str) -> int:
     matn_lower = matn.lower()
     patterns = [
@@ -77,35 +80,26 @@ def chek_summasini_top(matn: str) -> int:
         r'([\d\s\.,]+)[\s]*(?:uzs|so\'m|som)'
     ]
     topilgan_raqamlar = []
-    
     for pattern in patterns:
         matches = re.findall(pattern, matn_lower)
         for match in matches:
             clean_num = re.sub(r'[^\d]', '', match)
             if clean_num:
                 val = int(clean_num)
-                if 1000 <= val <= 5000000:
-                    topilgan_raqamlar.append(val)
-                    
+                if 1000 <= val <= 5000000: topilgan_raqamlar.append(val)
     if not topilgan_raqamlar:
         all_numbers = re.findall(r'\b\d[\d\s\.,]{3,7}\d\b', matn_lower)
         for num in all_numbers:
             clean_num = re.sub(r'[^\d]', '', num)
             if clean_num:
                 val = int(clean_num)
-                if 1000 <= val <= 5000000:
-                    topilgan_raqamlar.append(val)
-                    
+                if 1000 <= val <= 5000000: topilgan_raqamlar.append(val)
     for v in topilgan_raqamlar:
-        if v >= 5000:
-            return v
-            
+        if v >= 5000: return v
     return topilgan_raqamlar[0] if topilgan_raqamlar else 0
 
-# --- BOT OBYEKTLARI ---
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
-reader = easyocr.Reader(['en'], gpu=False)
 
 class AlarmState(StatesGroup):
     waiting_for_date = State()
@@ -115,10 +109,7 @@ class AlarmState(StatesGroup):
     waiting_for_payment = State()
 
 def get_admin_keyboard():
-    return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="📊 Statistika"), KeyboardButton(text="📋 Oxirgi 5 ta buyurtma")]],
-        resize_keyboard=True
-    )
+    return ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="📊 Statistika"), KeyboardButton(text="📋 Oxirgi 5 ta buyurtma")]], resize_keyboard=True)
 
 @dp.message(F.text == "/admin")
 async def admin_panel(message: Message):
@@ -136,7 +127,7 @@ async def show_orders(message: Message):
     if message.from_user.id != ADMIN_ID: return
     orders = oxirgi_buyurtmalar()
     if not orders:
-        await message.answer("📭 Hozircha faol buyurtmalar mavjud emas.")
+        await message.answer("📭 Hozircha faol buyurtmalar magenta emas.")
         return
     text = "📋 **Oxirgi 5 ta faol buyurtma:**\n\n"
     for idx, (sana, soat, jinsi, info, summa) in enumerate(orders, 1):
@@ -185,10 +176,7 @@ async def process_payment(message: Message, state: FSMContext):
         file = await bot.get_file(file_id)
         file_path = f"downloads/{file_id}.jpg"
         await bot.download_file(file.file_path, file_path)
-        try:
-            result = reader.readtext(file_path, detail=0)
-            detected_text_all = " ".join(result)
-        except Exception as e: print(f"Rasm xatolik: {e}")
+        detected_text_all = await rasmdan_matn_oqish(file_path)
         if os.path.exists(file_path): os.remove(file_path)
         
     elif message.document and message.document.file_name.endswith('.pdf'):
@@ -220,7 +208,6 @@ async def process_payment(message: Message, state: FSMContext):
         user_data = await state.get_data()
         
         buyurtma_saqlash(user_data['wakeup_date'], user_data['wakeup_time'], user_data['user_gender'], user_data['user_info'], tushgan_summa)
-        
         await message.answer(f"✅ **To'lov cheki muvaffaqiyatli tasdiqlandi!** Rahmat!")
         
         report_text = (
@@ -231,18 +218,3 @@ async def process_payment(message: Message, state: FSMContext):
             f"👤 **Jinsi:** {user_data['user_gender']}\n"
             f"📝 **Ma'lumotlar:** {user_data['user_info']}\n"
             f"💳 **Holat:** Karta va summa to'liq tasdiqlandi."
-        )
-        await bot.send_message(ADMIN_ID, report_text)
-        await state.clear()
-    else:
-        await message.answer(
-            f"❌ **To'lov cheki rad etildi!**\n\n"
-            f"Sababi: Karta raqamimiz topilmadi yoki chekdan aniqlangan summa **5000 so'mdan kam** (Topilgan summa: {tushgan_summa} so'm).\n"
-            f"Iltimos, qaytadan to'g'ri chek yuboring."
-        )
-
-async def main():
-    await dp.start_polling(bot)
-
-if __name__ == "__main__":
-    asyncio.run(main())
