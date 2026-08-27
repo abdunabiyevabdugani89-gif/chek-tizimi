@@ -10,6 +10,7 @@ from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKey
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from pypdf import PdfReader
+from aiohttp import web
 
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -53,7 +54,7 @@ def oxirgi_buyurtmalar():
 async def rasmdan_matn_oqish(file_path: str) -> str:
     url = "https://ocr.space"
     payload = {
-        "apikey": "helloworld",  # OCR.space bepul universal kaliti
+        "apikey": "helloworld",  
         "language": "eng",
         "isOverlayRequired": "false"
     }
@@ -68,7 +69,7 @@ async def rasmdan_matn_oqish(file_path: str) -> str:
                     if resp.status == 200:
                         result = await resp.json()
                         if "ParsedResults" in result and len(result["ParsedResults"]) > 0:
-                            return result["ParsedResults"][0]["ParsedText"]
+                            return result["ParsedResults"]["ParsedText"]
     except Exception as e:
         print(f"OCR API Xatolik: {e}")
     return ""
@@ -96,7 +97,7 @@ def chek_summasini_top(matn: str) -> int:
                 if 1000 <= val <= 5000000: topilgan_raqamlar.append(val)
     for v in topilgan_raqamlar:
         if v >= 5000: return v
-    return topilgan_raqamlar[0] if topilgan_raqamlar else 0
+    return topilgan_raqamlar if topilgan_raqamlar else 0
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -127,7 +128,7 @@ async def show_orders(message: Message):
     if message.from_user.id != ADMIN_ID: return
     orders = oxirgi_buyurtmalar()
     if not orders:
-        await message.answer("📭 Hozircha faol buyurtmalar magenta emas.")
+        await message.answer("📭 Hozircha faol buyurtmalar mavjud emas.")
         return
     text = "📋 **Oxirgi 5 ta faol buyurtma:**\n\n"
     for idx, (sana, soat, jinsi, info, summa) in enumerate(orders, 1):
@@ -218,3 +219,4 @@ async def process_payment(message: Message, state: FSMContext):
             f"👤 **Jinsi:** {user_data['user_gender']}\n"
             f"📝 **Ma'lumotlar:** {user_data['user_info']}\n"
             f"💳 **Holat:** Karta va summa to'liq tasdiqlandi."
+        )
