@@ -1,4 +1,7 @@
-aiogram==3.13.0
-pillow==10.4.0
-pyzbar==0.1.9
-aiohttp==3.10.5
+--extra-index-url https://pytorch.org
+torch==2.2.1
+torchvision==0.17.1
+aiogram==3.13.1
+easyocr==1.7.1
+pypdf==4.0.1
+python-dotenv==1.0.1
