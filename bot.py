@@ -13,22 +13,26 @@ from pypdf import PdfReader
 from aiohttp import web
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
+# Muhit o'zgaruvchilarini yuklash
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
-RENDER_URL = os.getenv("RENDER_EXTERNAL_URL")  # Render taqdim etadigan tekin havola
+RENDER_URL = os.getenv("RENDER_EXTERNAL_URL")
 
 ssl._create_default_https_context = ssl._create_unverified_context
 
+# 💳 KARTA RAQAMLARI
 KARTA_RAQAMLARI = ["9860080387113030", "9860 0803 8711 3030", "986008******3030"]
 ASOSIY_KARTA_KORINISHI = "9860 0803 8711 3030"
 
+# 💾 SQLITE BAZANI SOZLASH
 conn = sqlite3.connect("cheklar.db", check_same_thread=False)
 cursor = conn.cursor()
 cursor.execute("CREATE TABLE IF NOT EXISTS ishlatilgan_cheklar (chek_id TEXT PRIMARY KEY)")
 cursor.execute("CREATE TABLE IF NOT EXISTS buyurtmalar (id INTEGER PRIMARY KEY AUTOINCREMENT, sana TEXT, soat TEXT, jinsi TEXT, info TEXT, summa INTEGER, vaqt TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
 conn.commit()
 
+# --- BAZA FUNKSIYALARI ---
 def chek_mavjudmi(chek_id):
     cursor.execute("SELECT 1 FROM ishlatilgan_cheklar WHERE chek_id = ?", (chek_id,))
     return cursor.fetchone() is not None
@@ -52,6 +56,7 @@ def oxirgi_buyurtmalar():
     cursor.execute("SELECT sana, soat, jinsi, info, summa FROM buyurtmalar ORDER BY id DESC LIMIT 5")
     return cursor.fetchall()
 
+# --- RASMDAN MATNNI ONLINE EKSTRAKT QILISH (OCR SPACE FREE API) ---
 async def rasmdan_matn_oqish(file_path: str) -> str:
     url = "https://ocr.space"
     payload = {"apikey": "helloworld", "language": "eng", "isOverlayRequired": "false"}
@@ -206,6 +211,3 @@ async def process_payment(message: Message, state: FSMContext):
             f"📅 **Sana:** {user_data['wakeup_date']}\n"
             f"⏰ **Soat:** {user_data['wakeup_time']}\n"
             f"👤 **Jinsi:** {user_data['user_gender']}\n"
-            f"📝 **Ma'lumotlar:** {user_data['user_info']}\n"
-            f"💳 **Holat:** Karta va summa to'liq tasdiqlandi."
-        )
