@@ -11,10 +11,12 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from pypdf import PdfReader
 from aiohttp import web
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
+RENDER_URL = os.getenv("RENDER_EXTERNAL_URL")  # Render taqdim etadigan tekin havola
 
 ssl._create_default_https_context = ssl._create_unverified_context
 
@@ -50,36 +52,26 @@ def oxirgi_buyurtmalar():
     cursor.execute("SELECT sana, soat, jinsi, info, summa FROM buyurtmalar ORDER BY id DESC LIMIT 5")
     return cursor.fetchall()
 
-# --- RASMDAN MATNNI ONLINE EKSTRAKT QILISH (OCR SPACE FREE API) ---
 async def rasmdan_matn_oqish(file_path: str) -> str:
     url = "https://ocr.space"
-    payload = {
-        "apikey": "helloworld",  
-        "language": "eng",
-        "isOverlayRequired": "false"
-    }
+    payload = {"apikey": "helloworld", "language": "eng", "isOverlayRequired": "false"}
     try:
         async with aiohttp.ClientSession() as session:
             with open(file_path, 'rb') as f:
                 data = aiohttp.FormData()
                 data.add_field('file', f, filename=os.path.basename(file_path))
                 for k, v in payload.items(): data.add_field(k, v)
-                
                 async with session.post(url, data=data, timeout=30) as resp:
                     if resp.status == 200:
                         result = await resp.json()
                         if "ParsedResults" in result and len(result["ParsedResults"]) > 0:
                             return result["ParsedResults"]["ParsedText"]
-    except Exception as e:
-        print(f"OCR API Xatolik: {e}")
+    except Exception as e: print(f"OCR API Xatolik: {e}")
     return ""
 
 def chek_summasini_top(matn: str) -> int:
     matn_lower = matn.lower()
-    patterns = [
-        r'(?:summa|miqdori|amount|итого|оплата|uzs|so\'m|som)[\s\:\-]*([\d\s\.,]+)',
-        r'([\d\s\.,]+)[\s]*(?:uzs|so\'m|som)'
-    ]
+    patterns = [r'(?:summa|miqdori|amount|итого|оплата|uzs|so\'m|som)[\s\:\-]*([\d\s\.,]+)', r'([\d\s\.,]+)[\s]*(?:uzs|so\'m|som)']
     topilgan_raqamlar = []
     for pattern in patterns:
         matches = re.findall(pattern, matn_lower)
@@ -179,7 +171,6 @@ async def process_payment(message: Message, state: FSMContext):
         await bot.download_file(file.file_path, file_path)
         detected_text_all = await rasmdan_matn_oqish(file_path)
         if os.path.exists(file_path): os.remove(file_path)
-        
     elif message.document and message.document.file_name.endswith('.pdf'):
         file_id = message.document.file_id
         file = await bot.get_file(file_id)
@@ -196,7 +187,6 @@ async def process_payment(message: Message, state: FSMContext):
 
     clean_text = detected_text_all.lower().replace("-", "").replace(" ", "").replace("\n", "")
     is_valid_karta = any(karta.replace(" ", "") in clean_text for karta in KARTA_RAQAMLARI)
-    
     tushgan_summa = chek_summasini_top(detected_text_all)
     chek_unikal_id = clean_text[:20] if len(clean_text) > 20 else clean_text
     
@@ -207,7 +197,6 @@ async def process_payment(message: Message, state: FSMContext):
     if is_valid_karta and tushgan_summa >= 5000:
         chek_qoshish(chek_unikal_id)
         user_data = await state.get_data()
-        
         buyurtma_saqlash(user_data['wakeup_date'], user_data['wakeup_time'], user_data['user_gender'], user_data['user_info'], tushgan_summa)
         await message.answer(f"✅ **To'lov cheki muvaffaqiyatli tasdiqlandi!** Rahmat!")
         
